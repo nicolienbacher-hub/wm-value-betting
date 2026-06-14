@@ -392,6 +392,34 @@ with st.sidebar:
     st.caption(f"Modus: **{kelly_label}**")
 
     st.divider()
+    max_odds = st.slider(
+        "Maximale Quote (Risk Limit)",
+        min_value=1.5,
+        max_value=10.0,
+        value=2.5,
+        step=0.1,
+        format="%.1f",
+        help=(
+            "Longshot-Filter: Value Bets werden nur empfohlen, wenn die "
+            "Buchmacher-Quote ≤ diesem Wert liegt.\n\n"
+            "Hintergrund: Bei sehr hohen Quoten (Außenseitern) neigen "
+            "Wetter zu Longshot Bias – die Wahrscheinlichkeiten wirken "
+            "attraktiver als sie sind. Das Poisson-Modell ist dort "
+            "weniger zuverlässig kalibriert.\n\n"
+            "Empfehlung: 2.5–3.5 für konservative Strategie."
+        ),
+    )
+    # Kontextinfo: welche Quoten-Zone ist das?
+    if max_odds <= 2.0:
+        st.caption(f"Filter: Quoten bis **{max_odds:.1f}** – nur klare Favoriten")
+    elif max_odds <= 3.0:
+        st.caption(f"Filter: Quoten bis **{max_odds:.1f}** – Favoriten & leichte Außenseiter")
+    elif max_odds <= 5.0:
+        st.caption(f"Filter: Quoten bis **{max_odds:.1f}** – moderate Außenseiter")
+    else:
+        st.caption(f"Filter: Quoten bis **{max_odds:.1f}** ⚠️ Longshot-Risiko steigt")
+
+    st.divider()
     st.subheader("ℹ️ Elo-Datenbank")
     st.caption(f"{len(ELO_DATABASE)} Teams")
     with st.expander("Teams anzeigen"):
@@ -426,16 +454,10 @@ with tab1:
     if fetch_clicked:
         with st.spinner("Lade Spieldaten ..."):
             loaded = _fetch_with_feedback(api_key_input or None)
-        st.session_state.all_matches = loaded
-
         if loaded:
-            recs, eff_k, _, multi = analyze_matchday(loaded, bankroll, kelly_pct)
-            st.session_state.recommendations  = recs
-            st.session_state.effective_kelly  = eff_k
-            st.session_state.multi_bet_active = multi
-            st.session_state.data_loaded      = True
-            # Session-Schutz zurücksetzen damit neu geladene Spiele eintragbar sind
-            st.session_state.added_bet_keys   = set()
+            st.session_state.all_matches    = loaded
+            st.session_state.data_loaded    = True
+            st.session_state.added_bet_keys = set()
 
     # Statusmeldungen
     for level, text in st.session_state.get("load_messages", []):
@@ -448,10 +470,14 @@ with tab1:
         )
         st.stop()
 
-    all_matches     = st.session_state.all_matches
-    effective_kelly = st.session_state.effective_kelly
-    multi_active    = st.session_state.multi_bet_active
-    recommendations = st.session_state.recommendations
+    all_matches = st.session_state.all_matches
+
+    # Analyse läuft bei JEDEM Render neu — so wirkt der max_odds-Slider
+    # sofort, ohne dass der Nutzer erneut abrufen muss.
+    recs, effective_kelly, _, multi_active = analyze_matchday(
+        all_matches, bankroll, kelly_pct, max_odds=max_odds
+    )
+    recommendations = recs
     total_vb        = sum(len(r.value_bets) for r in recommendations)
 
     # ── Übersichtskarten ──────────────────────────────────────────────────────
