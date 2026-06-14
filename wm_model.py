@@ -467,26 +467,56 @@ def print_value_report(
 # Quelle: eloratings.net – Werte gerundet auf 10 Punkte.
 # Erweiterbar: einfach weitere Einträge hinzufügen.
 ELO_DATABASE: dict[str, float] = {
-    "Argentinien":   2140,
-    "Frankreich":    2080,
-    "Brasilien":     2060,
-    "England":       2020,
-    "Spanien":       2000,
-    "Portugal":      1980,
-    "Niederlande":   1960,
-    "Deutschland":   1940,
-    "Belgien":       1920,
-    "Uruguay":       1880,
-    "USA":           1850,
-    "Kroatien":      1840,
-    "Mexiko":        1830,
-    "Marokko":       1820,
-    "Japan":         1810,
-    "Senegal":       1790,
-    "Australien":    1760,
-    "Schweiz":       1870,
-    "Kolumbien":     1860,
-    "Kamerun":       1710,
+    # ── Weltspitze ────────────────────────────────────────────────────────────
+    "Argentinien":    2140,
+    "Frankreich":     2080,
+    "Brasilien":      2060,
+    "England":        2020,
+    "Spanien":        2000,
+    "Portugal":       1980,
+    "Niederlande":    1960,
+    "Deutschland":    1940,
+    "Belgien":        1920,
+    "Schweiz":        1870,
+    "Kolumbien":      1860,
+    "Ecuador":        1850,
+    "Uruguay":        1880,
+    "Österreich":     1880,
+    "Kroatien":       1840,
+    "Mexiko":         1830,
+    "Türkei":         1820,
+    "Marokko":        1820,
+    "Japan":          1810,
+    "Norwegen":       1780,
+    "Südkorea":       1780,
+    "Schweden":       1800,
+    "Tschechien":     1800,
+    "USA":            1850,
+    # ── Mittelfeld ────────────────────────────────────────────────────────────
+    "Senegal":        1790,
+    "Elfenbeinküste": 1760,
+    "Australien":     1760,
+    "Schottland":     1760,
+    "Iran":           1750,
+    "Paraguay":       1740,
+    "Algerien":       1740,
+    "Tunesien":       1720,
+    "Kamerun":        1710,
+    "Ghana":          1680,
+    "Ägypten":        1700,
+    "Usbekistan":     1660,
+    # ── Außenseiter ───────────────────────────────────────────────────────────
+    "Kap Verde":      1650,
+    "Panama":         1650,
+    "DR Kongo":       1640,
+    "Saudi-Arabien":  1620,
+    "Irak":           1620,
+    "Südafrika":      1620,
+    "Katar":          1630,
+    "Jordanien":      1600,
+    "Neuseeland":     1600,
+    "Haiti":          1500,
+    "Curaçao":        1550,
 }
 
 
@@ -546,6 +576,7 @@ def analyze_matchday(
     bankroll:            float = 1000.0,
     kelly_fraction_pct:  float = 0.25,
     min_ev_threshold:    float = 0.0,
+    max_odds:            float = 10.0,
 ) -> list[MatchRecommendation]:
     """
     Analysiert einen kompletten Spieltag und gibt nur Spiele mit Value Bets zurück.
@@ -555,7 +586,11 @@ def analyze_matchday(
     1. Elo-Lookup für beide Teams aus ELO_DATABASE
     2. Poisson-Modell → Wahrscheinlichkeiten
     3. EV-Berechnung gegen Buchmacher-Quoten
-    4. Filterung: nur Ausgänge mit EV > min_ev_threshold behalten
+    4. Filterung: Value Bet nur wenn EV > min_ev_threshold UND Quote <= max_odds
+       (Longshot-Filter: Außenseiter mit sehr hohen Quoten werden ausgeschlossen,
+       da das Poisson-Modell dort weniger kalibriert ist und der Longshot Bias
+       – die systematische Überschätzung von Außenseitern durch Wetter – zu
+       falschen EV-Signalen führen kann)
     5. Multi-Bet-Sicherheitsabschlag:
        Wenn über ALLE Spiele des Tages mehr als eine Value Bet gefunden wird,
        wird der Kelly-Einsatz halbiert (×0.5). Begründung: Kelly-Kriterium
@@ -569,11 +604,13 @@ def analyze_matchday(
     bankroll           : Gesamtkapital in EUR
     kelly_fraction_pct : Basis-Kelly-Bruchteil (vor Multi-Bet-Abschlag)
     min_ev_threshold   : Mindest-EV für eine Value Bet (Standard: 0.0 = positiv)
+    max_odds           : Maximale Buchmacher-Quote für eine Value Bet.
+                         Ausgänge mit höherer Quote werden ignoriert,
+                         auch wenn EV > 0 (Longshot-Filter). Standard: 10.0
 
     Returns
     -------
-    Liste von MatchRecommendation-Objekten (nur Spiele MIT Value Bets),
-    sortiert nach bestem EV pro Spiel (absteigend).
+    Tupel (recommendations, effective_kelly, bankroll, multi_bet_active).
     """
     recommendations: list[MatchRecommendation] = []
 
@@ -585,7 +622,11 @@ def analyze_matchday(
         opportunities = analyze_value(
             match_probs, scheduled.bookie_odds, team_a.name, team_b.name
         )
-        value_bets = [o for o in opportunities if o.ev > min_ev_threshold]
+        # Doppeltes Filterkriterium: positiver EV UND Quote innerhalb des Limits
+        value_bets = [
+            o for o in opportunities
+            if o.ev > min_ev_threshold and o.bookie_odds <= max_odds
+        ]
 
         if value_bets:
             recommendations.append(MatchRecommendation(
@@ -721,33 +762,71 @@ def print_matchday_report(
 # in die deutschen Schlüssel unserer ELO_DATABASE.
 # Erweiterbar: weitere Aliase einfach hinzufügen (z.B. Länderspezifika).
 TEAM_NAME_MAPPING: dict[str, str] = {
-    # Englischer API-Name   → Deutscher DB-Name
-    "Argentina":              "Argentinien",
-    "France":                 "Frankreich",
-    "Brazil":                 "Brasilien",
-    "England":                "England",
-    "Spain":                  "Spanien",
-    "Portugal":               "Portugal",
-    "Netherlands":            "Niederlande",
-    "Germany":                "Deutschland",
-    "Belgium":                "Belgien",
-    "Uruguay":                "Uruguay",
-    "United States":          "USA",
-    "USA":                    "USA",
-    "Croatia":                "Kroatien",
-    "Mexico":                 "Mexiko",
-    "Morocco":                "Marokko",
-    "Japan":                  "Japan",
-    "Senegal":                "Senegal",
-    "Australia":              "Australien",
-    "Switzerland":            "Schweiz",
-    "Colombia":               "Kolumbien",
-    "Cameroon":               "Kamerun",
-    # Defensive Aliase (alternative Schreibweisen mancher APIs)
-    "Brasil":                 "Brasilien",
-    "Espana":                 "Spanien",
-    "Pays-Bas":               "Niederlande",
-    "Allemagne":              "Deutschland",
+    # Englischer API-Name        → Deutscher DB-Name
+    # ── Weltspitze ──────────────────────────────────────────────────────────
+    "Argentina":                   "Argentinien",
+    "France":                      "Frankreich",
+    "Brazil":                      "Brasilien",
+    "England":                     "England",
+    "Spain":                       "Spanien",
+    "Portugal":                    "Portugal",
+    "Netherlands":                 "Niederlande",
+    "Germany":                     "Deutschland",
+    "Belgium":                     "Belgien",
+    "Switzerland":                 "Schweiz",
+    "Colombia":                    "Kolumbien",
+    "Ecuador":                     "Ecuador",
+    "Uruguay":                     "Uruguay",
+    "Austria":                     "Österreich",
+    "Croatia":                     "Kroatien",
+    "Mexico":                      "Mexiko",
+    "Turkey":                      "Türkei",
+    "Turkiye":                     "Türkei",   # FIFA-Schreibweise seit 2022
+    "Morocco":                     "Marokko",
+    "Japan":                       "Japan",
+    "Norway":                      "Norwegen",
+    "South Korea":                 "Südkorea",
+    "Korea Republic":              "Südkorea",
+    "Sweden":                      "Schweden",
+    "Czech Republic":              "Tschechien",
+    "Czechia":                     "Tschechien",
+    "United States":               "USA",
+    "USA":                         "USA",
+    # ── Mittelfeld ──────────────────────────────────────────────────────────
+    "Senegal":                     "Senegal",
+    "Ivory Coast":                 "Elfenbeinküste",
+    "Cote d'Ivoire":               "Elfenbeinküste",
+    "Australia":                   "Australien",
+    "Scotland":                    "Schottland",
+    "Iran":                        "Iran",
+    "Paraguay":                    "Paraguay",
+    "Algeria":                     "Algerien",
+    "Tunisia":                     "Tunesien",
+    "Cameroon":                    "Kamerun",
+    "Ghana":                       "Ghana",
+    "Egypt":                       "Ägypten",
+    "Uzbekistan":                  "Usbekistan",
+    # ── Außenseiter ─────────────────────────────────────────────────────────
+    "Cape Verde":                  "Kap Verde",
+    "Cabo Verde":                  "Kap Verde",
+    "Panama":                      "Panama",
+    "DR Congo":                    "DR Kongo",
+    "Congo DR":                    "DR Kongo",
+    "Democratic Republic of Congo": "DR Kongo",
+    "Saudi Arabia":                "Saudi-Arabien",
+    "Iraq":                        "Irak",
+    "South Africa":                "Südafrika",
+    "Qatar":                       "Katar",
+    "Jordan":                      "Jordanien",
+    "New Zealand":                 "Neuseeland",
+    "Haiti":                       "Haiti",
+    "Curacao":                     "Curaçao",
+    "Curaçao":                     "Curaçao",
+    # ── Defensive Aliase (alternative API-Schreibweisen) ────────────────────
+    "Brasil":                      "Brasilien",
+    "Espana":                      "Spanien",
+    "Pays-Bas":                    "Niederlande",
+    "Allemagne":                   "Deutschland",
 }
 
 
